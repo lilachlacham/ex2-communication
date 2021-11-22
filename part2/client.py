@@ -6,55 +6,56 @@ import logging
 from watchdog.observers import Observer
 from watchdog.events import PatternMatchingEventHandler, LoggingEventHandler
 
+CREATE_COMMAND = 1
+DELETE_COMMAND = 2
+MODIFY_COMMAND = 3
+PULL_COMMAND = 4
 
-# data = s.recv()
-# print("Server sent: ", data)
-# s.close()
 
-def updates_from_server(identifier, s):
+def updates_from_server(identifier, s, base_path):
     is_identifier = 1
     is_identifier = is_identifier.to_bytes(1, 'little')
-    identifier = bytes(identifier)
-    pull = 4
-    pull = pull.to_bytes(1, 'little')
+    identifier = identifier.encode('utf-8')
+    pull = PULL_COMMAND.to_bytes(1, 'little')
     data = is_identifier + identifier + pull
     s.send(data)
     while True:
-        path_size = int(s.recv(4))
-        if path_size == 0:
+        command = int.from_bytes(s.recv(1), 'utf-8')
+        if command != CREATE_COMMAND:
             break
-
-        path = str(s.recv(path_size))
-        file_size = int(s.recv(4))
+        path_size = int.from_bytes(s.recv(4), 'utf-8')
+        path = os.path.join(os.path.dirname(base_path), s.recv(path_size).decode('utf-8'))
+        file_size = int.from_bytes(s.recv(4), 'utf-8')
         file_data = s.recv(file_size)
         with open(path, 'wb+') as f:
             f.write(file_data)
 
 
-def push_file_to_server(identifier, s, file_path):
+def push_file_to_server(identifier, s, file_path, base_path):
     is_identifier = int(1).to_bytes(1, 'little')
-    identifier = bytes(identifier)
-    create = int(1).to_bytes(1, 'little')
+    identifier = identifier.encode('utf-8')
+    create = CREATE_COMMAND.to_bytes(1, 'little')
     size_path = len(file_path).to_bytes(4, 'little')
     with open(file_path, 'rb') as f:
         data = f.read()
 
+    # Append listening directory name with file path
+    rel_file_path = os.path.join(os.path.basename(base_path), os.path.relpath(file_path, base_path))
+
     file_size = len(data).to_bytes(4, 'little')
-    packet_to_send = is_identifier + identifier + create + size_path + bytes(file_path) + file_size + data
+    packet_to_send = is_identifier + identifier + create + size_path + rel_file_path.encode('utf-8') + file_size + data
     s.send(packet_to_send)
 
 
 def push_all_to_server(identifier, s, path):
     for root, subdirs, files in os.walk(path):
         for file in files:
-            push_file_to_server(identifier, s, file)
-        for subdir in subdirs:
-            push_all_to_server(identifier, s, subdir)
+            push_file_to_server(identifier, s, os.path.join(root, file), path)
 
 
 def first_connected_to_server(identifier, s, path):
     if identifier:
-        updates_from_server(identifier, s)
+        updates_from_server(identifier, s, path)
         return identifier
     else:
         identifier = get_identifier_from_server(s)
@@ -67,7 +68,7 @@ def get_identifier_from_server(s):
     is_identifier = is_identifier.to_bytes(1, 'little')
     data = is_identifier
     s.send(data)
-    return s.recv(128)
+    return s.recv(128).decode('utf-8')
 
 
 class Handler(PatternMatchingEventHandler):
@@ -91,7 +92,7 @@ class Handler(PatternMatchingEventHandler):
 if __name__ == "__main__":
     ip = sys.argv[1]
     port_num = int(sys.argv[2])
-    path = sys.argv[3]
+    path = os.path.abspath(sys.argv[3])
     time_series = int(sys.argv[4])
     if len(sys.argv) == 6:
         identifier = sys.argv[5]
@@ -110,17 +111,13 @@ if __name__ == "__main__":
 
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.connect((ip, port_num))
-    first_connected_to_server(identifier, s, path)
-    s.close()
+    identifier = first_connected_to_server(identifier, s, path)
 
     try:
         while True:
             # Set the thread sleep time
             time.sleep(time_series)
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.connect((ip, port_num))
-            updates_from_server(identifier, s)
-            s.close()
+            updates_from_server(identifier, s, path)
     except KeyboardInterrupt:
         observer.stop()
     observer.join()
