@@ -19,6 +19,11 @@ file_changes_dict = {}
 client_sockets = []
 
 
+class ClientDisconnectedException(BaseException):
+    def __init__(self):
+        super().__init__(self, "Client Disconnected")
+
+
 def generate_identifier():
     return ''.join(random.choices(string.ascii_uppercase + string.ascii_lowercase + string.digits, k=128))
 
@@ -110,9 +115,10 @@ def update_client(client_socket, identifier, client_address):
 
 
 def handle_client(client_socket, client_address):
-    is_identifier = int.from_bytes(client_socket.recv(1), 'little')
+    is_identifier = client_socket.recv(1)
     if not is_identifier:
-        raise "Socket closed"
+        raise ClientDisconnectedException()
+    is_identifier = int.from_bytes(is_identifier, 'little')
     if is_identifier == 0:
         identifier = generate_identifier()
         client_socket.send(identifier.encode('utf-8'))
@@ -134,7 +140,7 @@ def handle_all_clients():
                 handle_client(client_socket, client_address)
             except socket.timeout:
                 break
-            except str:
+            except ClientDisconnectedException:
                 removed_sockets.append((client_socket, client_address))
                 break
 
@@ -155,6 +161,6 @@ while True:
             handle_client(client_socket, client_address)
         except socket.timeout:
             break
-        except str:
+        except ClientDisconnectedException:
             client_sockets.remove((client_socket, client_address))
             break

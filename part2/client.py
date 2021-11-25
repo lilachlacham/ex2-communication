@@ -12,6 +12,11 @@ MODIFY_COMMAND = 3
 PULL_COMMAND = 4
 
 
+class ClientDisconnectedException(BaseException):
+    def __init__(self):
+        super().__init__(self, "Client Disconnected")
+
+
 def updates_from_server(identifier, s, base_path):
     is_identifier = 1
     is_identifier = is_identifier.to_bytes(1, 'little')
@@ -22,7 +27,7 @@ def updates_from_server(identifier, s, base_path):
     while True:
         command = s.recv(1)
         if not command:
-            raise "socket closed"
+            raise ClientDisconnectedException()
         command = int.from_bytes(command, 'utf-8')
         if command != CREATE_COMMAND:
             break
@@ -49,7 +54,8 @@ def push_file_to_server(identifier, s, file_path, base_path):
             data = f.read()
 
         file_size = len(data).to_bytes(4, 'little')
-        packet_to_send = is_identifier + identifier + create + is_directory + path_size + rel_file_path.encode('utf-8') + file_size + data
+        packet_to_send = is_identifier + identifier + create + is_directory + path_size + rel_file_path.encode(
+            'utf-8') + file_size + data
     s.send(packet_to_send)
 
 
@@ -127,6 +133,6 @@ if __name__ == "__main__":
             # Set the thread sleep time
             time.sleep(time_series)
             updates_from_server(identifier, s, path)
-    except (KeyboardInterrupt, str):
+    except (KeyboardInterrupt, ClientDisconnectedException):
         observer.stop()
     observer.join()
