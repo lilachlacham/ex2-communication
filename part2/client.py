@@ -110,17 +110,17 @@ def push_file_to_server(identifier, s, file_path, base_path):
     identifier = identifier.encode('utf-8')
     create = CREATE_COMMAND.to_bytes(1, 'little')
     # Append listening directory name with file path
-    rel_file_path = os.path.relpath(file_path, base_path)
-    path_size = len(rel_file_path).to_bytes(4, 'little')
+    sent_file_path = os.path.relpath(file_path, base_path)
+    path_size = len(sent_file_path).to_bytes(4, 'little')
     is_directory = os.path.isdir(file_path).to_bytes(1, 'little')
     if os.path.isdir(file_path):
-        packet_to_send = is_identifier + identifier + create + is_directory + path_size + rel_file_path.encode('utf-8')
+        packet_to_send = is_identifier + identifier + create + is_directory + path_size + sent_file_path.encode('utf-8')
     else:
         with open(file_path, 'rb') as f:
             data = f.read()
 
         file_size = len(data).to_bytes(4, 'little')
-        packet_to_send = is_identifier + identifier + create + is_directory + path_size + rel_file_path.encode(
+        packet_to_send = is_identifier + identifier + create + is_directory + path_size + sent_file_path.encode(
             'utf-8') + file_size + data
     s.send(packet_to_send)
 
@@ -154,8 +154,10 @@ def get_identifier_from_server(s):
 
 class Handler(PatternMatchingEventHandler):
     IGNORE_PATTERN = ".goutputstream"
-    def __init__(self):
+
+    def __init__(self, path):
         super(Handler, self).__init__(ignore_patterns=[f'*{Handler.IGNORE_PATTERN}*'])
+        self.base_path = path
 
     def on_created(self, event):
         print(f"Created {event.src_path}, is directory: {event.is_directory}")
@@ -184,7 +186,7 @@ if __name__ == "__main__":
         identifier = None
 
     # Initialize logging event handler
-    event_handler = Handler()
+    event_handler = Handler(path)
 
     # Initialize Observer
     observer = Observer()
@@ -193,15 +195,15 @@ if __name__ == "__main__":
     # Start the observer
     observer.start()
 
-    # s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    # s.connect((ip, port_num))
-    # identifier = first_connected_to_server(identifier, s, path)
-    #
-    # try:
-    #     while True:
-    #         # Set the thread sleep time
-    #         time.sleep(time_series)
-    #         pull_updates_from_server(identifier, s, path)
-    # except (KeyboardInterrupt, ClientDisconnectedException):
-    #     observer.stop()
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.connect((ip, port_num))
+    identifier = first_connected_to_server(identifier, s, path)
+
+    try:
+        while True:
+            # Set the thread sleep time
+            time.sleep(time_series)
+            pull_updates_from_server(identifier, s, path)
+    except (KeyboardInterrupt, ClientDisconnectedException):
+        observer.stop()
     observer.join()
