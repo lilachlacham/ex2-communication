@@ -31,8 +31,12 @@ def updates_from_server(identifier, s, base_path):
         command = int.from_bytes(command, 'utf-8')
         if command != CREATE_COMMAND:
             break
+        is_directory = int.from_bytes(s.recv(1), 'little')
         path_size = int.from_bytes(s.recv(4), 'utf-8')
         path = os.path.join(base_path, s.recv(path_size).decode('utf-8'))
+        if is_directory:
+            os.makedirs(path, exist_ok=True)
+            continue
         file_size = int.from_bytes(s.recv(4), 'utf-8')
         file_data = s.recv(file_size)
         with open(path, 'wb+') as f:

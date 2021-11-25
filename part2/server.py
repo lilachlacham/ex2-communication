@@ -39,8 +39,14 @@ def add_packet_to_update_dict(packet, identifier, client_address):
 def send_file_to_client(identifier, path, client_socket):
     send_path = os.path.relpath(path, identifier)
     packet = CREATE_COMMAND.to_bytes(1, 'little')
+    is_directory = os.path.isdir(path).to_bytes(1, 'little')
+    packet += is_directory
     packet += len(send_path).to_bytes(4, 'little')
     packet += send_path.encode('utf-8')
+    if not os.path.isdir(path):
+        client_socket.send(packet)
+        return
+
     with open(path, 'rb') as f:
         file_data = f.read()
 
@@ -59,6 +65,9 @@ def send_all_directory_to_client(path, identifier, client_socket):
     for root, subdirs, files in os.walk(path):
         for file in files:
             send_file_to_client(identifier, os.path.join(root, file), client_socket)
+        for subdir in subdirs:
+            if not os.listdir(os.path.join(root, subdir)):
+                send_file_to_client(identifier, os.path.join(root, subdir), client_socket)
 
     send_empty_file_to_client(client_socket)
 
