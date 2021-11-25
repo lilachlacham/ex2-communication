@@ -20,7 +20,10 @@ def updates_from_server(identifier, s, base_path):
     data = is_identifier + identifier + pull
     s.send(data)
     while True:
-        command = int.from_bytes(s.recv(1), 'utf-8')
+        command = s.recv(1)
+        if not command:
+            raise "socket closed"
+        command = int.from_bytes(command, 'utf-8')
         if command != CREATE_COMMAND:
             break
         path_size = int.from_bytes(s.recv(4), 'utf-8')
@@ -35,15 +38,18 @@ def push_file_to_server(identifier, s, file_path, base_path):
     is_identifier = int(1).to_bytes(1, 'little')
     identifier = identifier.encode('utf-8')
     create = CREATE_COMMAND.to_bytes(1, 'little')
-    with open(file_path, 'rb') as f:
-        data = f.read()
-
     # Append listening directory name with file path
     rel_file_path = os.path.relpath(file_path, base_path)
-    size_path = len(rel_file_path).to_bytes(4, 'little')
+    path_size = len(rel_file_path).to_bytes(4, 'little')
+    is_directory = os.path.isdir(file_path).to_bytes(1, 'little')
+    if os.path.isdir(file_path):
+        packet_to_send = is_identifier + identifier + create + is_directory + path_size + rel_file_path.encode('utf-8')
+    else:
+        with open(file_path, 'rb') as f:
+            data = f.read()
 
-    file_size = len(data).to_bytes(4, 'little')
-    packet_to_send = is_identifier + identifier + create + size_path + rel_file_path.encode('utf-8') + file_size + data
+        file_size = len(data).to_bytes(4, 'little')
+        packet_to_send = is_identifier + identifier + create + is_directory + path_size + rel_file_path.encode('utf-8') + file_size + data
     s.send(packet_to_send)
 
 
@@ -51,6 +57,9 @@ def push_all_to_server(identifier, s, path):
     for root, subdirs, files in os.walk(path):
         for file in files:
             push_file_to_server(identifier, s, os.path.join(root, file), path)
+        for subdir in subdirs:
+            if not os.listdir(os.path.join(root, subdir)):
+                push_file_to_server(identifier, s, os.path.join(root, subdir), path)
 
 
 def first_connected_to_server(identifier, s, path):
@@ -118,6 +127,6 @@ if __name__ == "__main__":
             # Set the thread sleep time
             time.sleep(time_series)
             updates_from_server(identifier, s, path)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, str):
         observer.stop()
     observer.join()

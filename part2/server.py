@@ -59,27 +59,37 @@ def send_all_directory_to_client(path, identifier, client_socket):
 
 
 def handle_command(identifier, command, client_socket, client_address):
+    packet = b''
+    if command == CREATE_COMMAND:
+        packet = create_command(client_socket, command, identifier)
+    elif command == PULL_COMMAND:
+        send_all_directory_to_client(identifier, identifier, client_socket)
+    if command != PULL_COMMAND:
+        add_packet_to_update_dict(packet, identifier, client_address)
+
+
+def create_command(client_socket, command, identifier):
+    is_directory = int.from_bytes(client_socket.recv(1), 'little')
     path_size = int.from_bytes(client_socket.recv(4), 'little')
     path = os.path.join(identifier, client_socket.recv(path_size).decode('utf-8'))
 
     packet = command.to_bytes(1, 'little')
+    packet = is_directory.to_bytes(1, 'little')
     packet += path_size.to_bytes(4, 'little')
     packet += os.path.relpath(path, identifier).encode('utf-8')
 
-    if command == CREATE_COMMAND:
-        file_size = int.from_bytes(client_socket.recv(4), 'little')
-        file_data = client_socket.recv(file_size)
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, 'wb+') as f:
-            f.write(file_data)
+    if is_directory:
+        os.makedirs(path, exist_ok=True)
+        return packet
 
-        packet += file_size.to_bytes(4, 'little')
-        packet += file_data
-    elif command == PULL_COMMAND:
-        send_all_directory_to_client(identifier, identifier, client_socket)
-
-    if command != PULL_COMMAND:
-        add_packet_to_update_dict(packet, identifier, client_address)
+    file_size = int.from_bytes(client_socket.recv(4), 'little')
+    file_data = client_socket.recv(file_size)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'wb+') as f:
+        f.write(file_data)
+    packet += file_size.to_bytes(4, 'little')
+    packet += file_data
+    return packet
 
 
 def add_client_to_file_dict(identifier, client_address):
@@ -101,6 +111,8 @@ def update_client(client_socket, identifier, client_address):
 
 def handle_client(client_socket, client_address):
     is_identifier = int.from_bytes(client_socket.recv(1), 'little')
+    if not is_identifier:
+        raise "Socket closed"
     if is_identifier == 0:
         identifier = generate_identifier()
         client_socket.send(identifier.encode('utf-8'))
@@ -114,12 +126,19 @@ def handle_client(client_socket, client_address):
 
 
 def handle_all_clients():
+    removed_sockets = []
+    global client_sockets
     for client_socket, client_address in client_sockets:
         while True:
             try:
                 handle_client(client_socket, client_address)
             except socket.timeout:
                 break
+            except str:
+                removed_sockets.append((client_socket, client_address))
+                break
+
+    client_sockets = list(set(client_sockets) - set(removed_sockets))
 
 
 while True:
@@ -135,4 +154,7 @@ while True:
         try:
             handle_client(client_socket, client_address)
         except socket.timeout:
+            break
+        except str:
+            client_sockets.remove((client_socket, client_address))
             break
