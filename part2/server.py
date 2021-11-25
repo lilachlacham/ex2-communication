@@ -74,6 +74,30 @@ def send_all_directory_to_client(path, identifier, client_socket):
     send_empty_file_to_client(client_socket)
 
 
+def create_command(client_socket, identifier):
+    is_directory = int.from_bytes(client_socket.recv(1), 'little')
+    path_size = int.from_bytes(client_socket.recv(4), 'little')
+    path = os.path.join(identifier, client_socket.recv(path_size).decode('utf-8'))
+
+    packet = CREATE_COMMAND.to_bytes(1, 'little')
+    packet += is_directory.to_bytes(1, 'little')
+    packet += path_size.to_bytes(4, 'little')
+    packet += os.path.relpath(path, identifier).encode('utf-8')
+
+    if is_directory:
+        os.makedirs(path, exist_ok=True)
+        return packet
+
+    file_size = int.from_bytes(client_socket.recv(4), 'little')
+    file_data = client_socket.recv(file_size)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'wb+') as f:
+        f.write(file_data)
+    packet += file_size.to_bytes(4, 'little')
+    packet += file_data
+    return packet
+
+
 def delete_recursive(path):
     for root, subdirs, files in os.walk(path, topdown=False):
         for file in files:
@@ -149,30 +173,6 @@ def handle_command(identifier, command, client_socket, client_address):
         add_packet_to_update_dict(packet, identifier, client_address)
 
 
-def create_command(client_socket, identifier):
-    is_directory = int.from_bytes(client_socket.recv(1), 'little')
-    path_size = int.from_bytes(client_socket.recv(4), 'little')
-    path = os.path.join(identifier, client_socket.recv(path_size).decode('utf-8'))
-
-    packet = CREATE_COMMAND.to_bytes(1, 'little')
-    packet = is_directory.to_bytes(1, 'little')
-    packet += path_size.to_bytes(4, 'little')
-    packet += os.path.relpath(path, identifier).encode('utf-8')
-
-    if is_directory:
-        os.makedirs(path, exist_ok=True)
-        return packet
-
-    file_size = int.from_bytes(client_socket.recv(4), 'little')
-    file_data = client_socket.recv(file_size)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, 'wb+') as f:
-        f.write(file_data)
-    packet += file_size.to_bytes(4, 'little')
-    packet += file_data
-    return packet
-
-
 def add_client_to_file_dict(identifier, client_address):
     if identifier not in file_changes_dict:
         file_changes_dict[identifier] = {client_address: []}
@@ -184,6 +184,8 @@ def add_client_to_file_dict(identifier, client_address):
 
 def update_client(client_socket, identifier, client_address):
     packets_to_send = file_changes_dict[identifier][client_address]
+    client_socket.send(len(packets_to_send).to_bytes(4, 'little'))
+
     for packet_to_send in packets_to_send:
         client_socket.send(packet_to_send)
 

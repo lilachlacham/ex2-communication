@@ -20,13 +20,14 @@ class ClientDisconnectedException(BaseException):
         super().__init__(self, "Client Disconnected")
 
 
-def pull_updates_from_server(identifier, s, base_path):
+def pull_all_from_server(identifier, s, base_path):
     is_identifier = 1
     is_identifier = is_identifier.to_bytes(1, 'little')
     identifier = identifier.encode('utf-8')
-    updates = UPDATES_COMMAND.to_bytes(1, 'little')
+    updates = PULL_COMMAND.to_bytes(1, 'little')
     data = is_identifier + identifier + updates
     s.send(data)
+
     while True:
         command = s.recv(1)
         if not command:
@@ -83,12 +84,12 @@ def handle_command_from_server(command, is_directory, path, base_path, s):
         os.rename(path, dest_path)
 
 
-def pull_all_from_server(identifier, s, base_path):
+def pull_updates_from_server(identifier, s, base_path):
     is_identifier = 1
     is_identifier = is_identifier.to_bytes(1, 'little')
     identifier = identifier.encode('utf-8')
-    pull = PULL_COMMAND.to_bytes(1, 'little')
-    data = is_identifier + identifier + pull
+    updates = UPDATES_COMMAND.to_bytes(1, 'little')
+    data = is_identifier + identifier + updates
     s.send(data)
 
     counts = s.recv(4)
@@ -152,9 +153,9 @@ def get_identifier_from_server(s):
 
 
 class Handler(PatternMatchingEventHandler):
-
+    IGNORE_PATTERN = ".goutputstream"
     def __init__(self):
-        super(Handler, self).__init__(ignore_patterns=['*.goutputstream*'])
+        super(Handler, self).__init__(ignore_patterns=[f'*{Handler.IGNORE_PATTERN}*'])
 
     def on_created(self, event):
         print(f"Created {event.src_path}, is directory: {event.is_directory}")
@@ -166,7 +167,10 @@ class Handler(PatternMatchingEventHandler):
         pass
 
     def on_moved(self, event):
-        print(f"Moved from {event.src_path} to {event.dest_path}, is directory: {event.is_directory}")
+        if Handler.IGNORE_PATTERN in event.src_path:
+            print(f"Modified {event.dest_path}, is directory: {event.is_directory}")
+        else:
+            print(f"Moved from {event.src_path} to {event.dest_path}, is directory: {event.is_directory}")
 
 
 if __name__ == "__main__":
@@ -189,15 +193,15 @@ if __name__ == "__main__":
     # Start the observer
     observer.start()
 
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.connect((ip, port_num))
-    identifier = first_connected_to_server(identifier, s, path)
-
-    try:
-        while True:
-            # Set the thread sleep time
-            time.sleep(time_series)
-            pull_all_from_server(identifier, s, path)
-    except (KeyboardInterrupt, ClientDisconnectedException):
-        observer.stop()
+    # s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    # s.connect((ip, port_num))
+    # identifier = first_connected_to_server(identifier, s, path)
+    #
+    # try:
+    #     while True:
+    #         # Set the thread sleep time
+    #         time.sleep(time_series)
+    #         pull_updates_from_server(identifier, s, path)
+    # except (KeyboardInterrupt, ClientDisconnectedException):
+    #     observer.stop()
     observer.join()
