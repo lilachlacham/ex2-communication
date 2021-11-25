@@ -7,7 +7,9 @@ import random
 CREATE_COMMAND = 1
 DELETE_COMMAND = 2
 MODIFY_COMMAND = 3
-PULL_COMMAND = 4
+MOVE_COMMAND = 4
+PULL_COMMAND = 5
+UPDATES_COMMAND = 6
 
 port = int(sys.argv[1])
 server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -72,22 +74,87 @@ def send_all_directory_to_client(path, identifier, client_socket):
     send_empty_file_to_client(client_socket)
 
 
+def delete_recursive(path):
+    for root, subdirs, files in os.walk(path, topdown=False):
+        for file in files:
+            os.remove(os.path.join(root, file))
+        for subdir in subdirs:
+            os.remove(os.path.join(root, subdir))
+
+
+def delete_command(client_socket, identifier):
+    is_directory = int.from_bytes(client_socket.recv(1), 'little')
+    path_size = int.from_bytes(client_socket.recv(4), 'little')
+    sent_path = client_socket.recv(path_size).decode('utf-8')
+    path = os.path.join(identifier, sent_path)
+
+    if not is_directory:
+        os.remove(path)
+    else:
+        delete_recursive(path)
+
+    return DELETE_COMMAND.to_bytes(1, 'little') + is_directory.to_bytes(1, 'little') + path_size.to_bytes(4, 'little') \
+           + sent_path.encode('utf-8')
+
+
+def modify_command(client_socket, identifier):
+    is_directory = int.from_bytes(client_socket.recv(1), 'little')
+    path_size = int.from_bytes(client_socket.recv(4), 'little')
+    sent_path = client_socket.recv(path_size).decode('utf-8')
+    path = os.path.join(identifier, sent_path)
+    file_size = int.from_bytes(client_socket.recv(4), 'utf-8')
+    file_data = client_socket.recv(file_size)
+    with open(path, 'wb+') as f:
+        f.write(file_data)
+
+    return MODIFY_COMMAND.to_bytes(1, 'little') + is_directory.to_bytes(1, 'little') + path_size.to_bytes(4, 'little') \
+           + sent_path.encode('utf-8') + file_size.to_bytes(4, 'little') + file_data
+
+
+def move_command(client_socket, identifier):
+    is_directory = int.from_bytes(client_socket.recv(1), 'little')
+    src_path_size = int.from_bytes(client_socket.recv(4), 'utf-8')
+    sent_src_path = client_socket.recv(src_path_size).decode('utf-8')
+    src_path = os.path.join(identifier, sent_src_path)
+    dst_path_size = int.from_bytes(client_socket.recv(4), 'utf-8')
+    sent_dst_path = client_socket.recv(dst_path_size).decode('utf-8')
+    dst_path = os.path.join(identifier, sent_dst_path)
+
+    if not is_directory and os.path.isfile(dst_path):
+        os.remove(dst_path)
+    elif is_directory and os.path.isdir(dst_path):
+        delete_recursive(dst_path)
+    os.rename(src_path, dst_path)
+
+    return MOVE_COMMAND.to_bytes(1, 'little') + is_directory.to_bytes(1, 'little') + src_path_size.to_bytes(4, 'little') \
+           + sent_src_path.encode('utf-8') + dst_path_size.to_bytes(4, 'little') + sent_dst_path.encode('utf-8')
+
+
 def handle_command(identifier, command, client_socket, client_address):
     packet = b''
     if command == CREATE_COMMAND:
-        packet = create_command(client_socket, command, identifier)
+        packet = create_command(client_socket, identifier)
+    elif command == DELETE_COMMAND:
+        packet = delete_command(client_socket, identifier)
+    elif command == MODIFY_COMMAND:
+        packet = modify_command(client_socket, identifier)
+    elif command == MOVE_COMMAND:
+        packet = move_command(client_socket, identifier)
     elif command == PULL_COMMAND:
         send_all_directory_to_client(identifier, identifier, client_socket)
-    if command != PULL_COMMAND:
+    elif command == UPDATES_COMMAND:
+        update_client(client_socket, identifier, client_address)
+
+    if command != PULL_COMMAND and command != UPDATES_COMMAND:
         add_packet_to_update_dict(packet, identifier, client_address)
 
 
-def create_command(client_socket, command, identifier):
+def create_command(client_socket, identifier):
     is_directory = int.from_bytes(client_socket.recv(1), 'little')
     path_size = int.from_bytes(client_socket.recv(4), 'little')
     path = os.path.join(identifier, client_socket.recv(path_size).decode('utf-8'))
 
-    packet = command.to_bytes(1, 'little')
+    packet = CREATE_COMMAND.to_bytes(1, 'little')
     packet = is_directory.to_bytes(1, 'little')
     packet += path_size.to_bytes(4, 'little')
     packet += os.path.relpath(path, identifier).encode('utf-8')
@@ -137,7 +204,6 @@ def handle_client(client_socket, client_address):
         handle_command(identifier, command, client_socket, client_address)
 
     add_client_to_file_dict(identifier, client_address)
-    update_client(client_socket, identifier, client_address)
 
 
 def handle_all_clients():

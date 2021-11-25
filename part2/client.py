@@ -6,10 +6,13 @@ import logging
 from watchdog.observers import Observer
 from watchdog.events import PatternMatchingEventHandler, LoggingEventHandler
 
+# Client commands
 CREATE_COMMAND = 1
 DELETE_COMMAND = 2
 MODIFY_COMMAND = 3
-PULL_COMMAND = 4
+MOVE_COMMAND = 4
+PULL_COMMAND = 5
+UPDATES_COMMAND = 6
 
 
 class ClientDisconnectedException(BaseException):
@@ -17,12 +20,12 @@ class ClientDisconnectedException(BaseException):
         super().__init__(self, "Client Disconnected")
 
 
-def updates_from_server(identifier, s, base_path):
+def pull_updates_from_server(identifier, s, base_path):
     is_identifier = 1
     is_identifier = is_identifier.to_bytes(1, 'little')
     identifier = identifier.encode('utf-8')
-    pull = PULL_COMMAND.to_bytes(1, 'little')
-    data = is_identifier + identifier + pull
+    updates = UPDATES_COMMAND.to_bytes(1, 'little')
+    data = is_identifier + identifier + updates
     s.send(data)
     while True:
         command = s.recv(1)
@@ -41,6 +44,64 @@ def updates_from_server(identifier, s, base_path):
         file_data = s.recv(file_size)
         with open(path, 'wb+') as f:
             f.write(file_data)
+
+
+def delete_recursive(path):
+    for root, subdirs, files in os.walk(path, topdown=False):
+        for file in files:
+            os.remove(os.path.join(root, file))
+        for subdir in subdirs:
+            os.remove(os.path.join(root, subdir))
+
+
+def handle_command_from_server(command, is_directory, path, base_path, s):
+    if command == CREATE_COMMAND:
+        if is_directory:
+            os.makedirs(path, exist_ok=True)
+            return
+        file_size = int.from_bytes(s.recv(4), 'utf-8')
+        file_data = s.recv(file_size)
+        with open(path, 'wb+') as f:
+            f.write(file_data)
+    elif command == DELETE_COMMAND:
+        if not is_directory:
+            os.remove(path)
+        else:
+            delete_recursive(path)
+    elif command == MODIFY_COMMAND:
+        file_size = int.from_bytes(s.recv(4), 'utf-8')
+        file_data = s.recv(file_size)
+        with open(path, 'wb+') as f:
+            f.write(file_data)
+    elif command == MOVE_COMMAND:
+        dest_path_size = int.from_bytes(s.recv(4), 'utf-8')
+        dest_path = os.path.join(base_path, s.recv(dest_path_size).decode('utf-8'))
+        if not is_directory and os.path.isfile(dest_path):
+            os.remove(dest_path)
+        elif is_directory and os.path.isdir(dest_path):
+            delete_recursive(dest_path)
+        os.rename(path, dest_path)
+
+
+def pull_all_from_server(identifier, s, base_path):
+    is_identifier = 1
+    is_identifier = is_identifier.to_bytes(1, 'little')
+    identifier = identifier.encode('utf-8')
+    pull = PULL_COMMAND.to_bytes(1, 'little')
+    data = is_identifier + identifier + pull
+    s.send(data)
+
+    counts = s.recv(4)
+    if not counts:
+        raise ClientDisconnectedException()
+
+    counts = int.from_bytes(counts, 'little')
+    for _ in range(counts):
+        command = int.from_bytes(s.recv(1), 'utf-8')
+        is_directory = int.from_bytes(s.recv(1), 'little')
+        path_size = int.from_bytes(s.recv(4), 'utf-8')
+        path = os.path.join(base_path, s.recv(path_size).decode('utf-8'))
+        handle_command_from_server(command, is_directory, path, base_path, s)
 
 
 def push_file_to_server(identifier, s, file_path, base_path):
@@ -74,7 +135,7 @@ def push_all_to_server(identifier, s, path):
 
 def first_connected_to_server(identifier, s, path):
     if identifier:
-        updates_from_server(identifier, s, path)
+        pull_all_from_server(identifier, s, path)
         return identifier
     else:
         identifier = get_identifier_from_server(s)
@@ -136,7 +197,7 @@ if __name__ == "__main__":
         while True:
             # Set the thread sleep time
             time.sleep(time_series)
-            updates_from_server(identifier, s, path)
+            pull_all_from_server(identifier, s, path)
     except (KeyboardInterrupt, ClientDisconnectedException):
         observer.stop()
     observer.join()
