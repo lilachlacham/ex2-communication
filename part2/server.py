@@ -45,7 +45,7 @@ def send_file_to_client(identifier, path, client_socket):
     packet += is_directory
     packet += len(send_path).to_bytes(4, 'little')
     packet += send_path.encode('utf-8')
-    if not os.path.isdir(path):
+    if os.path.isdir(path):
         client_socket.send(packet)
         return
 
@@ -113,6 +113,9 @@ def delete_command(client_socket, identifier):
     sent_path = client_socket.recv(path_size).decode('utf-8')
     path = os.path.join(identifier, sent_path)
 
+    if not os.path.isfile(path) and not os.path.isdir(path):
+        return b''
+
     if not is_directory:
         os.remove(path)
     else:
@@ -129,6 +132,7 @@ def modify_command(client_socket, identifier):
     path = os.path.join(identifier, sent_path)
     file_size = int.from_bytes(client_socket.recv(4), 'little')
     file_data = client_socket.recv(file_size)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, 'wb+') as f:
         f.write(file_data)
 
@@ -145,10 +149,14 @@ def move_command(client_socket, identifier):
     sent_dst_path = client_socket.recv(dst_path_size).decode('utf-8')
     dst_path = os.path.join(identifier, sent_dst_path)
 
+    if not os.path.isfile(src_path) and not os.path.isdir(src_path):
+        return b''
+
     if not is_directory and os.path.isfile(dst_path):
         os.remove(dst_path)
     elif is_directory and os.path.isdir(dst_path):
         delete_recursive(dst_path)
+
     os.rename(src_path, dst_path)
 
     return MOVE_COMMAND.to_bytes(1, 'little') + is_directory.to_bytes(1, 'little') + src_path_size.to_bytes(4, 'little') \
@@ -170,7 +178,7 @@ def handle_command(identifier, command, client_socket, client_address):
     elif command == UPDATES_COMMAND:
         update_client(client_socket, identifier, client_address)
 
-    if command != PULL_COMMAND and command != UPDATES_COMMAND:
+    if packet:
         add_packet_to_update_dict(packet, identifier, client_address)
 
 
@@ -218,7 +226,7 @@ def handle_all_clients():
                 handle_client(client_socket, client_address)
             except socket.timeout:
                 break
-            except ClientDisconnectedException:
+            except (ClientDisconnectedException, ConnectionResetError):
                 removed_sockets.append((client_socket, client_address))
                 break
 
@@ -230,7 +238,7 @@ def handle_all_clients():
 def remove_client_from_dict(client_address):
     for identifier in file_changes_dict:
         if client_address in file_changes_dict[identifier]:
-            del file_changes_dict[identifier]
+            del file_changes_dict[identifier][client_address]
             break
 
 
@@ -248,7 +256,7 @@ while True:
             handle_client(client_socket, client_address)
         except socket.timeout:
             break
-        except ClientDisconnectedException:
+        except (ClientDisconnectedException, ConnectionResetError):
             client_sockets.remove((client_socket, client_address))
             remove_client_from_dict(client_address)
             break

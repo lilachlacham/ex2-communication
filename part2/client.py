@@ -32,17 +32,18 @@ def pull_all_from_server(identifier, s, base_path):
         command = s.recv(1)
         if not command:
             raise ClientDisconnectedException()
-        command = int.from_bytes(command, 'utf-8')
+        command = int.from_bytes(command, 'little')
         if command != CREATE_COMMAND:
             break
         is_directory = int.from_bytes(s.recv(1), 'little')
-        path_size = int.from_bytes(s.recv(4), 'utf-8')
+        path_size = int.from_bytes(s.recv(4), 'little')
         path = os.path.join(base_path, s.recv(path_size).decode('utf-8'))
         if is_directory:
             os.makedirs(path, exist_ok=True)
             continue
-        file_size = int.from_bytes(s.recv(4), 'utf-8')
+        file_size = int.from_bytes(s.recv(4), 'little')
         file_data = s.recv(file_size)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, 'wb+') as f:
             f.write(file_data)
 
@@ -61,8 +62,9 @@ def handle_command_from_server(command, is_directory, path, base_path, s):
         if is_directory:
             os.makedirs(path, exist_ok=True)
             return
-        file_size = int.from_bytes(s.recv(4), 'utf-8')
+        file_size = int.from_bytes(s.recv(4), 'little')
         file_data = s.recv(file_size)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, 'wb+') as f:
             f.write(file_data)
     elif command == DELETE_COMMAND:
@@ -71,12 +73,13 @@ def handle_command_from_server(command, is_directory, path, base_path, s):
         else:
             delete_recursive(path)
     elif command == MODIFY_COMMAND:
-        file_size = int.from_bytes(s.recv(4), 'utf-8')
+        file_size = int.from_bytes(s.recv(4), 'little')
         file_data = s.recv(file_size)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, 'wb+') as f:
             f.write(file_data)
     elif command == MOVE_COMMAND:
-        dest_path_size = int.from_bytes(s.recv(4), 'utf-8')
+        dest_path_size = int.from_bytes(s.recv(4), 'little')
         dest_path = os.path.join(base_path, s.recv(dest_path_size).decode('utf-8'))
         if not is_directory and os.path.isfile(dest_path):
             os.remove(dest_path)
@@ -98,10 +101,11 @@ def pull_updates_from_server(identifier, s, base_path):
         raise ClientDisconnectedException()
 
     counts = int.from_bytes(counts, 'little')
+    print(f"Got {counts} updates from server")
     for _ in range(counts):
-        command = int.from_bytes(s.recv(1), 'utf-8')
+        command = int.from_bytes(s.recv(1), 'little')
         is_directory = int.from_bytes(s.recv(1), 'little')
-        path_size = int.from_bytes(s.recv(4), 'utf-8')
+        path_size = int.from_bytes(s.recv(4), 'little')
         path = os.path.join(base_path, s.recv(path_size).decode('utf-8'))
         handle_command_from_server(command, is_directory, path, base_path, s)
 
