@@ -170,6 +170,41 @@ def send_delete_message(client_socket, identifier, base_path, file_path, is_dire
     client_socket.send(packet)
 
 
+def send_modify_message(client_socket, identifier, base_path, file_path, is_directory):
+    is_identifier = int(1).to_bytes(1, 'little')
+    identifier = identifier.encode('utf-8')
+    modify = MODIFY_COMMAND.to_bytes(1, 'little')
+    # Append listening directory name with file path
+    sent_file_path = os.path.relpath(file_path, base_path)
+    path_size = len(sent_file_path).to_bytes(4, 'little')
+    is_directory = is_directory.to_bytes(1, 'little')
+
+    with open(file_path, 'rb') as f:
+        data = f.read()
+
+    data_size = len(data).to_bytes(4, 'little')
+    packet = is_identifier + identifier + modify + is_directory + path_size + sent_file_path.encode('utf-8') \
+             + data_size + data
+
+    client_socket.send(packet)
+
+
+def send_move_message(client_socket, identifier, base_path, src_path, dest_path, is_directory):
+    is_identifier = int(1).to_bytes(1, 'little')
+    identifier = identifier.encode('utf-8')
+    move = MOVE_COMMAND.to_bytes(1, 'little')
+    # Append listening directory name with file path
+    sent_src_file_path = os.path.relpath(src_path, base_path)
+    src_path_size = len(sent_src_file_path).to_bytes(4, 'little')
+    sent_dest_file_path = os.path.relpath(dest_path, base_path)
+    dest_path_size = len(sent_dest_file_path).to_bytes(4, 'little')
+    is_directory = is_directory.to_bytes(1, 'little')
+
+    packet = is_identifier + identifier + move + is_directory + src_path_size + sent_src_file_path.encode('utf-8') \
+             + dest_path_size + sent_dest_file_path.encode('utf-8')
+
+    client_socket.send(packet)
+
 class Handler(PatternMatchingEventHandler):
     IGNORE_PATTERN = ".goutputstream"
 
@@ -193,8 +228,11 @@ class Handler(PatternMatchingEventHandler):
     def on_moved(self, event):
         if Handler.IGNORE_PATTERN in event.src_path:
             print(f"Modified {event.dest_path}, is directory: {event.is_directory}")
+            send_modify_message(self.client_socket, self.identifier, self.base_path, event.dest_path, event.is_directory)
         else:
             print(f"Moved from {event.src_path} to {event.dest_path}, is directory: {event.is_directory}")
+            send_move_message(self.client_socket, self.identifier, self.base_path, event.src_path, event.dest_path,
+                                event.is_directory)
 
 
 if __name__ == "__main__":
@@ -206,7 +244,6 @@ if __name__ == "__main__":
         identifier = sys.argv[5]
     else:
         identifier = None
-
 
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.connect((ip, port_num))

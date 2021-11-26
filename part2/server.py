@@ -127,7 +127,7 @@ def modify_command(client_socket, identifier):
     path_size = int.from_bytes(client_socket.recv(4), 'little')
     sent_path = client_socket.recv(path_size).decode('utf-8')
     path = os.path.join(identifier, sent_path)
-    file_size = int.from_bytes(client_socket.recv(4), 'utf-8')
+    file_size = int.from_bytes(client_socket.recv(4), 'little')
     file_data = client_socket.recv(file_size)
     with open(path, 'wb+') as f:
         f.write(file_data)
@@ -138,10 +138,10 @@ def modify_command(client_socket, identifier):
 
 def move_command(client_socket, identifier):
     is_directory = int.from_bytes(client_socket.recv(1), 'little')
-    src_path_size = int.from_bytes(client_socket.recv(4), 'utf-8')
+    src_path_size = int.from_bytes(client_socket.recv(4), 'little')
     sent_src_path = client_socket.recv(src_path_size).decode('utf-8')
     src_path = os.path.join(identifier, sent_src_path)
-    dst_path_size = int.from_bytes(client_socket.recv(4), 'utf-8')
+    dst_path_size = int.from_bytes(client_socket.recv(4), 'little')
     sent_dst_path = client_socket.recv(dst_path_size).decode('utf-8')
     dst_path = os.path.join(identifier, sent_dst_path)
 
@@ -225,6 +225,7 @@ def handle_all_clients():
     client_sockets = list(set(client_sockets) - set(removed_sockets))
     for remove_socket in removed_sockets:
         remove_client_from_dict(remove_socket[1])
+
 
 def remove_client_from_dict(client_address):
     for identifier in file_changes_dict:
