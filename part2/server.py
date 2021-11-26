@@ -223,6 +223,14 @@ def handle_all_clients():
                 break
 
     client_sockets = list(set(client_sockets) - set(removed_sockets))
+    for remove_socket in removed_sockets:
+        remove_client_from_dict(remove_socket[1])
+
+def remove_client_from_dict(client_address):
+    for identifier in file_changes_dict:
+        if client_address in file_changes_dict[identifier]:
+            del file_changes_dict[identifier]
+            break
 
 
 while True:
@@ -241,4 +249,5 @@ while True:
             break
         except ClientDisconnectedException:
             client_sockets.remove((client_socket, client_address))
+            remove_client_from_dict(client_address)
             break
