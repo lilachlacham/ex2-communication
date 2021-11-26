@@ -103,7 +103,8 @@ def delete_recursive(path):
         for file in files:
             os.remove(os.path.join(root, file))
         for subdir in subdirs:
-            os.remove(os.path.join(root, subdir))
+            os.rmdir(os.path.join(root, subdir))
+    os.rmdir(path)
 
 
 def delete_command(client_socket, identifier):

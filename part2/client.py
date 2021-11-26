@@ -52,7 +52,8 @@ def delete_recursive(path):
         for file in files:
             os.remove(os.path.join(root, file))
         for subdir in subdirs:
-            os.remove(os.path.join(root, subdir))
+            os.rmdir(os.path.join(root, subdir))
+    os.rmdir(path)
 
 
 def handle_command_from_server(command, is_directory, path, base_path, s):
@@ -152,18 +153,39 @@ def get_identifier_from_server(s):
     return s.recv(128).decode('utf-8')
 
 
+def send_create_message(client_socket, identifier, base_path, src_path, is_directory):
+    push_file_to_server(identifier, client_socket, src_path, base_path)
+
+
+def send_delete_message(client_socket, identifier, base_path, file_path, is_directory):
+    is_identifier = int(1).to_bytes(1, 'little')
+    identifier = identifier.encode('utf-8')
+    delete = DELETE_COMMAND.to_bytes(1, 'little')
+    # Append listening directory name with file path
+    sent_file_path = os.path.relpath(file_path, base_path)
+    path_size = len(sent_file_path).to_bytes(4, 'little')
+    is_directory = is_directory.to_bytes(1, 'little')
+
+    packet = is_identifier + identifier + delete + is_directory + path_size + sent_file_path.encode('utf-8')
+    client_socket.send(packet)
+
+
 class Handler(PatternMatchingEventHandler):
     IGNORE_PATTERN = ".goutputstream"
 
-    def __init__(self, path):
+    def __init__(self, base_path, client_socket, identifier):
         super(Handler, self).__init__(ignore_patterns=[f'*{Handler.IGNORE_PATTERN}*'])
-        self.base_path = path
+        self.base_path = base_path
+        self.client_socket = client_socket
+        self.identifier = identifier
 
     def on_created(self, event):
         print(f"Created {event.src_path}, is directory: {event.is_directory}")
+        send_create_message(self.client_socket, self.identifier, self.base_path, event.src_path, event.is_directory)
 
     def on_deleted(self, event):
         print(f"Deleted {event.src_path}, is directory: {event.is_directory}")
+        send_delete_message(self.client_socket, self.identifier, self.base_path, event.src_path, event.is_directory)
 
     def on_modified(self, event):
         pass
@@ -185,8 +207,13 @@ if __name__ == "__main__":
     else:
         identifier = None
 
+
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.connect((ip, port_num))
+    identifier = first_connected_to_server(identifier, s, path)
+
     # Initialize logging event handler
-    event_handler = Handler(path)
+    event_handler = Handler(path, s, identifier)
 
     # Initialize Observer
     observer = Observer()
@@ -195,15 +222,12 @@ if __name__ == "__main__":
     # Start the observer
     observer.start()
 
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.connect((ip, port_num))
-    identifier = first_connected_to_server(identifier, s, path)
-
     try:
         while True:
             # Set the thread sleep time
             time.sleep(time_series)
             pull_updates_from_server(identifier, s, path)
     except (KeyboardInterrupt, ClientDisconnectedException):
+        print('Server Disconnected...')
         observer.stop()
     observer.join()
