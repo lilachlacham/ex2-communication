@@ -78,6 +78,8 @@ def create_command(client_socket, identifier):
     is_directory = int.from_bytes(client_socket.recv(1), 'little')
     path_size = int.from_bytes(client_socket.recv(4), 'little')
     path = os.path.join(identifier, client_socket.recv(path_size).decode('utf-8'))
+    path = path.replace("/", os.sep)
+    path = path.replace('\\', os.sep)
 
     packet = CREATE_COMMAND.to_bytes(1, 'little')
     packet += is_directory.to_bytes(1, 'little')
@@ -91,6 +93,7 @@ def create_command(client_socket, identifier):
     file_size = int.from_bytes(client_socket.recv(4), 'little')
     file_data = client_socket.recv(file_size)
     os.makedirs(os.path.dirname(path), exist_ok=True)
+
     with open(path, 'wb+') as f:
         f.write(file_data)
     packet += file_size.to_bytes(4, 'little')
@@ -104,7 +107,8 @@ def delete_recursive(path):
             os.remove(os.path.join(root, file))
         for subdir in subdirs:
             os.rmdir(os.path.join(root, subdir))
-    os.rmdir(path)
+    if os.path.isdir(path):
+        os.rmdir(path)
 
 
 def delete_command(client_socket, identifier):
@@ -112,11 +116,13 @@ def delete_command(client_socket, identifier):
     path_size = int.from_bytes(client_socket.recv(4), 'little')
     sent_path = client_socket.recv(path_size).decode('utf-8')
     path = os.path.join(identifier, sent_path)
+    path = path.replace("/", os.sep)
+    path = path.replace('\\', os.sep)
 
     if not os.path.isfile(path) and not os.path.isdir(path):
         return b''
 
-    if not is_directory:
+    if not os.path.isdir(path):
         os.remove(path)
     else:
         delete_recursive(path)
@@ -130,8 +136,11 @@ def modify_command(client_socket, identifier):
     path_size = int.from_bytes(client_socket.recv(4), 'little')
     sent_path = client_socket.recv(path_size).decode('utf-8')
     path = os.path.join(identifier, sent_path)
+    path = path.replace("/", os.sep)
+    path = path.replace('\\', os.sep)
     file_size = int.from_bytes(client_socket.recv(4), 'little')
     file_data = client_socket.recv(file_size)
+
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, 'wb+') as f:
         f.write(file_data)
@@ -145,19 +154,27 @@ def move_command(client_socket, identifier):
     src_path_size = int.from_bytes(client_socket.recv(4), 'little')
     sent_src_path = client_socket.recv(src_path_size).decode('utf-8')
     src_path = os.path.join(identifier, sent_src_path)
+    src_path = src_path.replace("/", os.sep)
+    src_path = src_path.replace('\\', os.sep)
     dst_path_size = int.from_bytes(client_socket.recv(4), 'little')
     sent_dst_path = client_socket.recv(dst_path_size).decode('utf-8')
     dst_path = os.path.join(identifier, sent_dst_path)
+    dst_path = dst_path.replace("/", os.sep)
+    dst_path = dst_path.replace('\\', os.sep)
 
     if not os.path.isfile(src_path) and not os.path.isdir(src_path):
         return b''
 
     if not is_directory and os.path.isfile(dst_path):
         os.remove(dst_path)
-    elif is_directory and os.path.isdir(dst_path):
-        delete_recursive(dst_path)
 
-    os.rename(src_path, dst_path)
+    os.makedirs(os.path.dirname(dst_path), exist_ok=True)
+
+    if is_directory and os.path.isdir(dst_path):
+        if not os.listdir(src_path):
+            os.rmdir(src_path)
+    else:
+        os.rename(src_path, dst_path)
 
     return MOVE_COMMAND.to_bytes(1, 'little') + is_directory.to_bytes(1, 'little') + src_path_size.to_bytes(4, 'little') \
            + sent_src_path.encode('utf-8') + dst_path_size.to_bytes(4, 'little') + sent_dst_path.encode('utf-8')

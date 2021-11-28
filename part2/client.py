@@ -4,7 +4,7 @@ import sys
 import time
 import logging
 from watchdog.observers import Observer
-from watchdog.events import PatternMatchingEventHandler, LoggingEventHandler
+from watchdog.events import PatternMatchingEventHandler
 
 # Client commands
 CREATE_COMMAND = 1
@@ -13,6 +13,37 @@ MODIFY_COMMAND = 3
 MOVE_COMMAND = 4
 PULL_COMMAND = 5
 UPDATES_COMMAND = 6
+
+observer = None
+
+
+def start_watchdog(base_path, s, identifier):
+    global observer
+    if observer:
+        return
+    # Initialize logging event handler
+    event_handler = Handler(base_path, s, identifier)
+
+    # Initialize Observer
+    observer = Observer()
+    observer.schedule(event_handler, base_path, recursive=True)
+
+    # Start the observer
+    observer.start()
+
+
+def stop_watchdog():
+    global observer
+    if observer:
+        observer.stop()
+        wait_observer()
+        observer = None
+
+
+def wait_observer():
+    global observer
+    if observer:
+        observer.join()
 
 
 class ClientDisconnectedException(BaseException):
@@ -38,11 +69,14 @@ def pull_all_from_server(identifier, s, base_path):
         is_directory = int.from_bytes(s.recv(1), 'little')
         path_size = int.from_bytes(s.recv(4), 'little')
         path = os.path.join(base_path, s.recv(path_size).decode('utf-8'))
+        path = path.replace("/", os.sep)
+        path = path.replace('\\', os.sep)
         if is_directory:
             os.makedirs(path, exist_ok=True)
             continue
         file_size = int.from_bytes(s.recv(4), 'little')
         file_data = s.recv(file_size)
+
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, 'wb+') as f:
             f.write(file_data)
@@ -54,7 +88,8 @@ def delete_recursive(path):
             os.remove(os.path.join(root, file))
         for subdir in subdirs:
             os.rmdir(os.path.join(root, subdir))
-    os.rmdir(path)
+    if os.path.isdir(path):
+        os.rmdir(path)
 
 
 def handle_command_from_server(command, is_directory, path, base_path, s):
@@ -64,28 +99,39 @@ def handle_command_from_server(command, is_directory, path, base_path, s):
             return
         file_size = int.from_bytes(s.recv(4), 'little')
         file_data = s.recv(file_size)
+
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, 'wb+') as f:
             f.write(file_data)
     elif command == DELETE_COMMAND:
-        if not is_directory:
-            os.remove(path)
+        if not os.path.isdir(path):
+            if os.path.isfile(path):
+                os.remove(path)
         else:
             delete_recursive(path)
     elif command == MODIFY_COMMAND:
         file_size = int.from_bytes(s.recv(4), 'little')
         file_data = s.recv(file_size)
+
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, 'wb+') as f:
             f.write(file_data)
     elif command == MOVE_COMMAND:
-        dest_path_size = int.from_bytes(s.recv(4), 'little')
-        dest_path = os.path.join(base_path, s.recv(dest_path_size).decode('utf-8'))
-        if not is_directory and os.path.isfile(dest_path):
-            os.remove(dest_path)
-        elif is_directory and os.path.isdir(dest_path):
-            delete_recursive(dest_path)
-        os.rename(path, dest_path)
+        dst_path_size = int.from_bytes(s.recv(4), 'little')
+        dst_path = os.path.join(base_path, s.recv(dst_path_size).decode('utf-8'))
+        dst_path = dst_path.replace("/", os.sep)
+        dst_path = dst_path.replace('\\', os.sep)
+
+        if not is_directory and os.path.isfile(dst_path):
+            os.remove(dst_path)
+
+        os.makedirs(os.path.dirname(dst_path), exist_ok=True)
+
+        if is_directory and os.path.isdir(dst_path):
+            if not os.listdir(path):
+                os.rmdir(path)
+        else:
+            os.rename(path, dst_path)
 
 
 def pull_updates_from_server(identifier, s, base_path):
@@ -102,12 +148,16 @@ def pull_updates_from_server(identifier, s, base_path):
 
     counts = int.from_bytes(counts, 'little')
     print(f"Got {counts} updates from server")
+    stop_watchdog()
     for _ in range(counts):
         command = int.from_bytes(s.recv(1), 'little')
         is_directory = int.from_bytes(s.recv(1), 'little')
         path_size = int.from_bytes(s.recv(4), 'little')
         path = os.path.join(base_path, s.recv(path_size).decode('utf-8'))
+        path = path.replace("/", os.sep)
+        path = path.replace('\\', os.sep)
         handle_command_from_server(command, is_directory, path, base_path, s)
+    start_watchdog(base_path, s, identifier.decode('utf-8'))
 
 
 def push_file_to_server(identifier, s, file_path, base_path):
@@ -141,6 +191,7 @@ def push_all_to_server(identifier, s, path):
 
 def first_connected_to_server(identifier, s, path):
     if identifier:
+        delete_recursive(path)
         pull_all_from_server(identifier, s, path)
         return identifier
     else:
@@ -209,6 +260,7 @@ def send_move_message(client_socket, identifier, base_path, src_path, dest_path,
 
     client_socket.send(packet)
 
+
 class Handler(PatternMatchingEventHandler):
     IGNORE_PATTERN = ".goutputstream"
 
@@ -220,23 +272,30 @@ class Handler(PatternMatchingEventHandler):
 
     def on_created(self, event):
         print(f"Created {event.src_path}, is directory: {event.is_directory}")
-        send_create_message(self.client_socket, self.identifier, self.base_path, event.src_path, event.is_directory)
+        send_create_message(self.client_socket, self.identifier, self.base_path, event.src_path,
+                            os.path.isdir(event.src_path))
 
     def on_deleted(self, event):
         print(f"Deleted {event.src_path}, is directory: {event.is_directory}")
-        send_delete_message(self.client_socket, self.identifier, self.base_path, event.src_path, event.is_directory)
+        send_delete_message(self.client_socket, self.identifier, self.base_path, event.src_path,
+                            os.path.isdir(event.src_path))
 
     def on_modified(self, event):
-        pass
+        if os.path.isdir(event.src_path):
+            return
+        print(f"Modified {event.src_path}, is directory: {event.is_directory}")
+        send_modify_message(self.client_socket, self.identifier, self.base_path, event.src_path,
+                            os.path.isdir(event.src_path))
 
     def on_moved(self, event):
         if Handler.IGNORE_PATTERN in event.src_path:
             print(f"Modified {event.dest_path}, is directory: {event.is_directory}")
-            send_modify_message(self.client_socket, self.identifier, self.base_path, event.dest_path, event.is_directory)
+            send_modify_message(self.client_socket, self.identifier, self.base_path, event.dest_path,
+                                os.path.isdir(event.dest_path))
         else:
             print(f"Moved from {event.src_path} to {event.dest_path}, is directory: {event.is_directory}")
             send_move_message(self.client_socket, self.identifier, self.base_path, event.src_path, event.dest_path,
-                                event.is_directory)
+                              os.path.isdir(event.dest_path))
 
 
 if __name__ == "__main__":
@@ -252,16 +311,7 @@ if __name__ == "__main__":
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.connect((ip, port_num))
     identifier = first_connected_to_server(identifier, s, path)
-
-    # Initialize logging event handler
-    event_handler = Handler(path, s, identifier)
-
-    # Initialize Observer
-    observer = Observer()
-    observer.schedule(event_handler, path, recursive=True)
-
-    # Start the observer
-    observer.start()
+    print(f"Identifier: {identifier}")
 
     try:
         while True:
@@ -270,5 +320,5 @@ if __name__ == "__main__":
             pull_updates_from_server(identifier, s, path)
     except (KeyboardInterrupt, ClientDisconnectedException):
         print('Server Disconnected...')
-        observer.stop()
-    observer.join()
+        stop_watchdog()
+    wait_observer()
