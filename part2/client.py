@@ -17,6 +17,7 @@ UPDATES_COMMAND = 6
 observer = None
 
 
+# Start watchdog observer on base_path parameter
 def start_watchdog(base_path, s, identifier):
     global observer
     if observer:
@@ -32,6 +33,7 @@ def start_watchdog(base_path, s, identifier):
     observer.start()
 
 
+# Stop running watchdog observer
 def stop_watchdog():
     global observer
     if observer:
@@ -40,6 +42,7 @@ def stop_watchdog():
         observer = None
 
 
+# Wait for observer to exit
 def wait_observer():
     global observer
     if observer:
@@ -51,6 +54,7 @@ class ClientDisconnectedException(BaseException):
         super().__init__(self, "Client Disconnected")
 
 
+# First connection to server with identifier, we receive all directory
 def pull_all_from_server(identifier, s, base_path):
     is_identifier = 1
     is_identifier = is_identifier.to_bytes(1, 'little')
@@ -61,12 +65,15 @@ def pull_all_from_server(identifier, s, base_path):
 
     while True:
         command = s.recv(1)
+        # If empty array it means the server exit
         if not command:
             raise ClientDisconnectedException()
         command = int.from_bytes(command, 'little', signed=True)
+        # If command == -1 it means we send invalid identifier
         if command == -1:
             print("Invalid identifier")
             raise ClientDisconnectedException()
+        # If we got the special packet that indicates there is no more files
         if command != CREATE_COMMAND:
             break
         is_directory = int.from_bytes(s.recv(1), 'little')
@@ -109,6 +116,7 @@ def handle_command_from_server(command, is_directory, path, base_path, s):
     elif command == DELETE_COMMAND:
         if not os.path.isdir(path):
             if os.path.isfile(path):
+                # If it file
                 os.remove(path)
         else:
             delete_recursive(path)
@@ -125,11 +133,13 @@ def handle_command_from_server(command, is_directory, path, base_path, s):
         dst_path = dst_path.replace("/", os.sep)
         dst_path = dst_path.replace('\\', os.sep)
 
+        # If is file and destination path exists we delete it
         if not is_directory and os.path.isfile(dst_path):
             os.remove(dst_path)
 
         os.makedirs(os.path.dirname(dst_path), exist_ok=True)
 
+        # If path is dir and the source dir is empty dir, we delete it, otherwise rename the file
         if is_directory and os.path.isdir(dst_path):
             if not os.listdir(path):
                 os.rmdir(path)
@@ -172,6 +182,7 @@ def push_file_to_server(identifier, s, file_path, base_path):
     if os.path.isdir(file_path):
         packet_to_send = is_identifier + identifier + create + is_directory + path_size + sent_file_path.encode('utf-8')
     else:
+        # If the file is not exists we return
         if not os.path.isfile(file_path):
             return
         with open(file_path, 'rb') as f:
@@ -194,10 +205,12 @@ def push_all_to_server(identifier, s, path):
 
 def first_connected_to_server(identifier, s, path):
     if identifier:
+        # If we accept identifier from command line, we remove the local path directory and get all files from server
         delete_recursive(path)
         pull_all_from_server(identifier, s, path)
         return identifier
     else:
+        # If we dont accepted identifier from command line, we got one from the server and push all files to server
         identifier = get_identifier_from_server(s)
         push_all_to_server(identifier, s, path)
         return identifier
@@ -211,10 +224,12 @@ def get_identifier_from_server(s):
     return s.recv(128).decode('utf-8')
 
 
+# Send create message for update
 def send_create_message(client_socket, identifier, base_path, src_path, is_directory):
     push_file_to_server(identifier, client_socket, src_path, base_path)
 
 
+# Send delete message for update
 def send_delete_message(client_socket, identifier, base_path, file_path, is_directory):
     is_identifier = int(1).to_bytes(1, 'little')
     identifier = identifier.encode('utf-8')
@@ -237,6 +252,7 @@ def send_modify_message(client_socket, identifier, base_path, file_path, is_dire
     path_size = len(sent_file_path).to_bytes(4, 'little')
     is_directory = is_directory.to_bytes(1, 'little')
 
+    # If file doesn't exists, return
     if not os.path.isfile(file_path):
         return
     with open(file_path, 'rb') as f:
@@ -267,6 +283,7 @@ def send_move_message(client_socket, identifier, base_path, src_path, dest_path,
 
 
 class Handler(PatternMatchingEventHandler):
+    # Linux OS create temp file with this name when modify file, so we ignore events with this file name
     IGNORE_PATTERN = ".goutputstream"
 
     def __init__(self, base_path, client_socket, identifier):
@@ -286,6 +303,7 @@ class Handler(PatternMatchingEventHandler):
                             os.path.isdir(event.src_path))
 
     def on_modified(self, event):
+        # If we got modified event on directory we ignore (Windows OS)
         if os.path.isdir(event.src_path):
             return
         print(f"Modified {event.src_path}, is directory: {event.is_directory}")
@@ -293,6 +311,8 @@ class Handler(PatternMatchingEventHandler):
                             os.path.isdir(event.src_path))
 
     def on_moved(self, event):
+        # If src_path is IGNORE_PATTERN it means that the file event.dest_path is just modified, so we send modify event
+        # And we ignore the src_path because this is temp file
         if Handler.IGNORE_PATTERN in event.src_path:
             print(f"Modified {event.dest_path}, is directory: {event.is_directory}")
             send_modify_message(self.client_socket, self.identifier, self.base_path, event.dest_path,

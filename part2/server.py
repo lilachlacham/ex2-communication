@@ -11,13 +11,9 @@ MOVE_COMMAND = 4
 PULL_COMMAND = 5
 UPDATES_COMMAND = 6
 
-port = int(sys.argv[1])
-server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-server.bind(('', port))
-server.settimeout(0.2)
-server.listen()
-
+# Dictionary that save changes of each client by his ID
 file_changes_dict = {}
+# Array of client sockets and address
 client_sockets = []
 
 
@@ -58,6 +54,7 @@ def send_file_to_client(identifier, path, client_socket):
     client_socket.send(packet)
 
 
+# Indicates that we reach all of files
 def send_empty_file_to_client(client_socket):
     packet = int(0).to_bytes(1, 'little')
     client_socket.send(packet)
@@ -71,6 +68,7 @@ def send_all_directory_to_client(path, identifier, client_socket):
             if not os.listdir(os.path.join(root, subdir)):
                 send_file_to_client(identifier, os.path.join(root, subdir), client_socket)
 
+    # Send empty message to indicates we sent all files
     send_empty_file_to_client(client_socket)
 
 
@@ -87,6 +85,7 @@ def create_command(client_socket, identifier):
     packet += os.path.relpath(path, identifier).encode('utf-8')
 
     if is_directory:
+        # If already created so return with empty update packet
         if os.path.isdir(path):
             return b''
         os.makedirs(path, exist_ok=True)
@@ -94,6 +93,8 @@ def create_command(client_socket, identifier):
 
     file_size = int.from_bytes(client_socket.recv(4), 'little')
     file_data = client_socket.recv(file_size)
+
+    # If already exists the same file we return with empty update packet
     if os.path.isfile(path):
         with open(path, 'rb') as f:
             current_data = f.read()
@@ -127,6 +128,7 @@ def delete_command(client_socket, identifier):
     path = path.replace("/", os.sep)
     path = path.replace('\\', os.sep)
 
+    # If file/directory does not exists, return with empty update packet
     if not os.path.isfile(path) and not os.path.isdir(path):
         return b''
 
@@ -150,6 +152,8 @@ def modify_command(client_socket, identifier):
     file_data = client_socket.recv(file_size)
 
     os.makedirs(os.path.dirname(path), exist_ok=True)
+
+    # If already exists the same file, we return with empty update packet
     if os.path.isfile(path):
         with open(path, 'rb') as f:
             current_data = f.read()
@@ -176,14 +180,17 @@ def move_command(client_socket, identifier):
     dst_path = dst_path.replace("/", os.sep)
     dst_path = dst_path.replace('\\', os.sep)
 
+    # If file/directory does not exists, return with empty update packet
     if not os.path.isfile(src_path) and not os.path.isdir(src_path):
         return b''
 
+    # Remove destination file if exists
     if not is_directory and os.path.isfile(dst_path):
         os.remove(dst_path)
 
     os.makedirs(os.path.dirname(dst_path), exist_ok=True)
 
+    # If path is dir and the source dir is empty dir, we delete it, otherwise rename the file
     if is_directory and os.path.isdir(dst_path):
         if not os.listdir(src_path):
             os.rmdir(src_path)
@@ -222,6 +229,7 @@ def add_client_to_file_dict(identifier, client_address):
             identifier_dict[client_address] = []
 
 
+# Send all update packets to client
 def update_client(client_socket, identifier, client_address):
     packets_to_send = file_changes_dict[identifier][client_address]
     client_socket.send(len(packets_to_send).to_bytes(4, 'little'))
@@ -234,9 +242,12 @@ def update_client(client_socket, identifier, client_address):
 
 def handle_client(client_socket, client_address):
     is_identifier = client_socket.recv(1)
+    # If is_identifier is empty array so the client disconnected
     if not is_identifier:
         raise ClientDisconnectedException()
+
     is_identifier = int.from_bytes(is_identifier, 'little')
+    # If not received identifier we generate one and send it to client, otherwise handle client command
     if is_identifier == 0:
         identifier = generate_identifier()
         os.makedirs(identifier, exist_ok=True)
@@ -244,12 +255,14 @@ def handle_client(client_socket, client_address):
     else:
         identifier = client_socket.recv(128).decode('utf-8')
         command = int.from_bytes(client_socket.recv(1), 'little')
+        # If client identify with invalid identifier we send him error code (-1)
         if not os.path.isdir(identifier):
             client_socket.send(int(-1).to_bytes(1, 'little', signed=True))
             client_socket.close()
             raise ClientDisconnectedException()
         handle_command(identifier, command, client_socket, client_address)
 
+    # Add client to dict of update changes
     add_client_to_file_dict(identifier, client_address)
 
 
@@ -266,6 +279,7 @@ def handle_all_clients():
                 removed_sockets.append((client_socket, client_address))
                 break
 
+    # Remove all clients that disconnected
     client_sockets = list(set(client_sockets) - set(removed_sockets))
     for remove_socket in removed_sockets:
         remove_client_from_dict(remove_socket[1])
@@ -278,25 +292,34 @@ def remove_client_from_dict(client_address):
             break
 
 
+port = int(sys.argv[1])
+server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+server.bind(('', port))
+server.settimeout(0.2)
+server.listen()
+
 try:
     while True:
         try:
+            # Wait for connection of new client for 0.2 seconds
             client_socket, client_address = server.accept()
             client_socket.settimeout(2)
             client_sockets.append((client_socket, client_address))
         except socket.timeout:
+            # If not accept new client, we iterate all existing clients and handle their commands
             handle_all_clients()
             continue
 
         while True:
             try:
+                # If new client accepted, handle him until non response timeout of 2 seconds
                 handle_client(client_socket, client_address)
             except socket.timeout:
                 break
             except (ClientDisconnectedException, ConnectionResetError):
+                # If client disconnected we remove him for our lists
                 client_sockets.remove((client_socket, client_address))
                 remove_client_from_dict(client_address)
                 break
 except KeyboardInterrupt:
     pass
-
