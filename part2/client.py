@@ -71,7 +71,6 @@ def pull_all_from_server(identifier, s, base_path):
         command = int.from_bytes(command, 'little', signed=True)
         # If command == -1 it means we send invalid identifier
         if command == -1:
-            print("Invalid identifier")
             raise ClientDisconnectedException()
         # If we got the special packet that indicates there is no more files
         if command != CREATE_COMMAND:
@@ -160,7 +159,6 @@ def pull_updates_from_server(identifier, s, base_path):
         raise ClientDisconnectedException()
 
     counts = int.from_bytes(counts, 'little')
-    print(f"Got {counts} updates from server")
     for _ in range(counts):
         command = int.from_bytes(s.recv(1), 'little')
         is_directory = int.from_bytes(s.recv(1), 'little')
@@ -293,12 +291,10 @@ class Handler(PatternMatchingEventHandler):
         self.identifier = identifier
 
     def on_created(self, event):
-        print(f"Created {event.src_path}, is directory: {event.is_directory}")
         send_create_message(self.client_socket, self.identifier, self.base_path, event.src_path,
                             os.path.isdir(event.src_path))
 
     def on_deleted(self, event):
-        print(f"Deleted {event.src_path}, is directory: {event.is_directory}")
         send_delete_message(self.client_socket, self.identifier, self.base_path, event.src_path,
                             os.path.isdir(event.src_path))
 
@@ -306,7 +302,6 @@ class Handler(PatternMatchingEventHandler):
         # If we got modified event on directory we ignore (Windows OS)
         if os.path.isdir(event.src_path):
             return
-        print(f"Modified {event.src_path}, is directory: {event.is_directory}")
         send_modify_message(self.client_socket, self.identifier, self.base_path, event.src_path,
                             os.path.isdir(event.src_path))
 
@@ -314,11 +309,9 @@ class Handler(PatternMatchingEventHandler):
         # If src_path is IGNORE_PATTERN it means that the file event.dest_path is just modified, so we send modify event
         # And we ignore the src_path because this is temp file
         if Handler.IGNORE_PATTERN in event.src_path:
-            print(f"Modified {event.dest_path}, is directory: {event.is_directory}")
             send_modify_message(self.client_socket, self.identifier, self.base_path, event.dest_path,
                                 os.path.isdir(event.dest_path))
         else:
-            print(f"Moved from {event.src_path} to {event.dest_path}, is directory: {event.is_directory}")
             send_move_message(self.client_socket, self.identifier, self.base_path, event.src_path, event.dest_path,
                               os.path.isdir(event.dest_path))
 
@@ -338,13 +331,11 @@ if __name__ == "__main__":
 
     try:
         identifier = first_connected_to_server(identifier, s, path)
-        print(f"Identifier: {identifier}")
         start_watchdog(path, s, identifier)
         while True:
             # Set the thread sleep time
             time.sleep(time_series)
             pull_updates_from_server(identifier, s, path)
     except (KeyboardInterrupt, ClientDisconnectedException):
-        print('Server Disconnected...')
         stop_watchdog()
     wait_observer()
