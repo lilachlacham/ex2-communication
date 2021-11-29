@@ -87,11 +87,19 @@ def create_command(client_socket, identifier):
     packet += os.path.relpath(path, identifier).encode('utf-8')
 
     if is_directory:
+        if os.path.isdir(path):
+            return b''
         os.makedirs(path, exist_ok=True)
         return packet
 
     file_size = int.from_bytes(client_socket.recv(4), 'little')
     file_data = client_socket.recv(file_size)
+    if os.path.isfile(path):
+        with open(path, 'rb') as f:
+            current_data = f.read()
+            if current_data == file_data:
+                return b''
+
     os.makedirs(os.path.dirname(path), exist_ok=True)
 
     with open(path, 'wb+') as f:
@@ -142,6 +150,12 @@ def modify_command(client_socket, identifier):
     file_data = client_socket.recv(file_size)
 
     os.makedirs(os.path.dirname(path), exist_ok=True)
+    if os.path.isfile(path):
+        with open(path, 'rb') as f:
+            current_data = f.read()
+            if current_data == file_data:
+                return b''
+
     with open(path, 'wb+') as f:
         f.write(file_data)
 
@@ -225,6 +239,7 @@ def handle_client(client_socket, client_address):
     is_identifier = int.from_bytes(is_identifier, 'little')
     if is_identifier == 0:
         identifier = generate_identifier()
+        os.makedirs(identifier, exist_ok=True)
         client_socket.send(identifier.encode('utf-8'))
     else:
         identifier = client_socket.recv(128).decode('utf-8')

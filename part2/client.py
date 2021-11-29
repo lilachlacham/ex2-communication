@@ -151,7 +151,7 @@ def pull_updates_from_server(identifier, s, base_path):
 
     counts = int.from_bytes(counts, 'little')
     print(f"Got {counts} updates from server")
-    stop_watchdog()
+    # stop_watchdog()
     for _ in range(counts):
         command = int.from_bytes(s.recv(1), 'little')
         is_directory = int.from_bytes(s.recv(1), 'little')
@@ -160,7 +160,7 @@ def pull_updates_from_server(identifier, s, base_path):
         path = path.replace("/", os.sep)
         path = path.replace('\\', os.sep)
         handle_command_from_server(command, is_directory, path, base_path, s)
-    start_watchdog(base_path, s, identifier.decode('utf-8'))
+    #start_watchdog(base_path, s, identifier.decode('utf-8'))
 
 
 def push_file_to_server(identifier, s, file_path, base_path):
@@ -174,6 +174,8 @@ def push_file_to_server(identifier, s, file_path, base_path):
     if os.path.isdir(file_path):
         packet_to_send = is_identifier + identifier + create + is_directory + path_size + sent_file_path.encode('utf-8')
     else:
+        if not os.path.isfile(file_path):
+            return
         with open(file_path, 'rb') as f:
             data = f.read()
 
@@ -237,6 +239,8 @@ def send_modify_message(client_socket, identifier, base_path, file_path, is_dire
     path_size = len(sent_file_path).to_bytes(4, 'little')
     is_directory = is_directory.to_bytes(1, 'little')
 
+    if not os.path.isfile(file_path):
+        return
     with open(file_path, 'rb') as f:
         data = f.read()
 
@@ -317,6 +321,7 @@ if __name__ == "__main__":
     try:
         identifier = first_connected_to_server(identifier, s, path)
         print(f"Identifier: {identifier}")
+        start_watchdog(path, s, identifier)
         while True:
             # Set the thread sleep time
             time.sleep(time_series)
