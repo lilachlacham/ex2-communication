@@ -63,7 +63,10 @@ def pull_all_from_server(identifier, s, base_path):
         command = s.recv(1)
         if not command:
             raise ClientDisconnectedException()
-        command = int.from_bytes(command, 'little')
+        command = int.from_bytes(command, 'little', signed=True)
+        if command == -1:
+            print("Invalid identifier")
+            raise ClientDisconnectedException()
         if command != CREATE_COMMAND:
             break
         is_directory = int.from_bytes(s.recv(1), 'little')
@@ -310,10 +313,10 @@ if __name__ == "__main__":
 
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.connect((ip, port_num))
-    identifier = first_connected_to_server(identifier, s, path)
-    print(f"Identifier: {identifier}")
 
     try:
+        identifier = first_connected_to_server(identifier, s, path)
+        print(f"Identifier: {identifier}")
         while True:
             # Set the thread sleep time
             time.sleep(time_series)

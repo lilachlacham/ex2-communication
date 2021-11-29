@@ -229,6 +229,10 @@ def handle_client(client_socket, client_address):
     else:
         identifier = client_socket.recv(128).decode('utf-8')
         command = int.from_bytes(client_socket.recv(1), 'little')
+        if not os.path.isdir(identifier):
+            client_socket.send(int(-1).to_bytes(1, 'little', signed=True))
+            client_socket.close()
+            raise ClientDisconnectedException()
         handle_command(identifier, command, client_socket, client_address)
 
     add_client_to_file_dict(identifier, client_address)
