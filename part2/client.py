@@ -326,6 +326,10 @@ if __name__ == "__main__":
     else:
         identifier = None
 
+    # If we don't got identifier and the path doesn't exists, we exit the program
+    if not identifier and not os.path.isdir(path):
+        exit()
+
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.connect((ip, port_num))
 
