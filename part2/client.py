@@ -151,7 +151,6 @@ def pull_updates_from_server(identifier, s, base_path):
 
     counts = int.from_bytes(counts, 'little')
     print(f"Got {counts} updates from server")
-    # stop_watchdog()
     for _ in range(counts):
         command = int.from_bytes(s.recv(1), 'little')
         is_directory = int.from_bytes(s.recv(1), 'little')
@@ -160,7 +159,6 @@ def pull_updates_from_server(identifier, s, base_path):
         path = path.replace("/", os.sep)
         path = path.replace('\\', os.sep)
         handle_command_from_server(command, is_directory, path, base_path, s)
-    #start_watchdog(base_path, s, identifier.decode('utf-8'))
 
 
 def push_file_to_server(identifier, s, file_path, base_path):

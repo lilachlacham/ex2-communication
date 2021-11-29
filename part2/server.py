@@ -278,21 +278,25 @@ def remove_client_from_dict(client_address):
             break
 
 
-while True:
-    try:
-        client_socket, client_address = server.accept()
-        client_socket.settimeout(2)
-        client_sockets.append((client_socket, client_address))
-    except socket.timeout:
-        handle_all_clients()
-        continue
-
+try:
     while True:
         try:
-            handle_client(client_socket, client_address)
+            client_socket, client_address = server.accept()
+            client_socket.settimeout(2)
+            client_sockets.append((client_socket, client_address))
         except socket.timeout:
-            break
-        except (ClientDisconnectedException, ConnectionResetError):
-            client_sockets.remove((client_socket, client_address))
-            remove_client_from_dict(client_address)
-            break
+            handle_all_clients()
+            continue
+
+        while True:
+            try:
+                handle_client(client_socket, client_address)
+            except socket.timeout:
+                break
+            except (ClientDisconnectedException, ConnectionResetError):
+                client_sockets.remove((client_socket, client_address))
+                remove_client_from_dict(client_address)
+                break
+except KeyboardInterrupt:
+    pass
+
