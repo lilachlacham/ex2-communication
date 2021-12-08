@@ -301,7 +301,21 @@ def remove_client_from_dict(client_address):
             break
 
 
-port = int(sys.argv[1])
+def check_port(n):
+    if n.isnumeric() == 0:
+        return 0
+    n = int(n)
+    if 0 <= n <= 65535:
+        return 1
+    else:
+        return 0
+
+
+port = sys.argv[1]
+if check_port(port) == 0:
+    exit()
+
+port = int(port)
 server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 server.bind(('', port))
 server.settimeout(0.2)

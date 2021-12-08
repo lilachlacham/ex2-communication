@@ -332,9 +332,32 @@ class Handler(PatternMatchingEventHandler):
                               os.path.isdir(event.dest_path))
 
 
+def check_port(n):
+    if n.isnumeric() == 0:
+        return 0
+    n = int(n)
+    if 0 <= n <= 65535:
+        return 1
+    else:
+        return 0
+
+
+def check_ip(n):
+    array = n.split(".")
+    if len(array) != 4:
+        return 0
+    else:
+        for j in range(0, len(array)):
+            if array[j].isnumeric() and 0 <= int(array[j]) <= 255:
+                continue
+            else:
+                return 0
+    return 1
+
+
 if __name__ == "__main__":
     ip = sys.argv[1]
-    port_num = int(sys.argv[2])
+    port_num = sys.argv[2]
     path = os.path.abspath(sys.argv[3])
     time_series = int(sys.argv[4])
     if len(sys.argv) == 6:
@@ -346,6 +369,10 @@ if __name__ == "__main__":
     if not identifier and not os.path.isdir(path):
         exit()
 
+    if check_ip(ip) == 0 or check_port(port_num) == 0:
+        exit()
+
+    port_num = int(port_num)
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.connect((ip, port_num))
 
