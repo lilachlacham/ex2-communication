@@ -53,6 +53,14 @@ class ClientDisconnectedException(BaseException):
         super().__init__(self, "Client Disconnected")
 
 
+def recv(client_socket, recv_size):
+    recv_data = b''
+    while len(recv_data) < recv_size:
+        recv_data += client_socket.recv(recv_size - len(recv_data))
+
+    return recv_data
+
+
 # First connection to server with identifier, we receive all directory
 def pull_all_from_server(identifier, s, base_path):
     is_identifier = 1
@@ -60,7 +68,7 @@ def pull_all_from_server(identifier, s, base_path):
     identifier = identifier.encode('utf-8')
     updates = PULL_COMMAND.to_bytes(1, 'little')
     data = is_identifier + identifier + updates
-    s.send(data)
+    s.sendall(data)
 
     while True:
         command = s.recv(1)
@@ -83,7 +91,7 @@ def pull_all_from_server(identifier, s, base_path):
             os.makedirs(path, exist_ok=True)
             continue
         file_size = int.from_bytes(s.recv(4), 'little')
-        file_data = s.recv(file_size)
+        file_data = recv(s, file_size)
 
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, 'wb+') as f:
@@ -106,7 +114,7 @@ def handle_command_from_server(command, is_directory, path, base_path, s):
             os.makedirs(path, exist_ok=True)
             return
         file_size = int.from_bytes(s.recv(4), 'little')
-        file_data = s.recv(file_size)
+        file_data = recv(s, file_size)
 
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, 'wb+') as f:
@@ -120,7 +128,7 @@ def handle_command_from_server(command, is_directory, path, base_path, s):
             delete_recursive(path)
     elif command == MODIFY_COMMAND:
         file_size = int.from_bytes(s.recv(4), 'little')
-        file_data = s.recv(file_size)
+        file_data = recv(s, file_size)
 
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, 'wb+') as f:
@@ -151,7 +159,7 @@ def pull_updates_from_server(identifier, s, base_path):
     identifier = identifier.encode('utf-8')
     updates = UPDATES_COMMAND.to_bytes(1, 'little')
     data = is_identifier + identifier + updates
-    s.send(data)
+    s.sendall(data)
 
     counts = s.recv(4)
     if not counts:
@@ -182,13 +190,17 @@ def push_file_to_server(identifier, s, file_path, base_path):
         # If the file is not exists we return
         if not os.path.isfile(file_path):
             return
-        with open(file_path, 'rb') as f:
-            data = f.read()
+
+        try:
+            with open(file_path, 'rb') as f:
+                data = f.read()
+        except PermissionError:
+            return
 
         file_size = len(data).to_bytes(4, 'little')
         packet_to_send = is_identifier + identifier + create + is_directory + path_size + sent_file_path.encode(
             'utf-8') + file_size + data
-    s.send(packet_to_send)
+    s.sendall(packet_to_send)
 
 
 def push_all_to_server(identifier, s, path):
@@ -217,7 +229,7 @@ def get_identifier_from_server(s):
     is_identifier = 0
     is_identifier = is_identifier.to_bytes(1, 'little')
     data = is_identifier
-    s.send(data)
+    s.sendall(data)
     return s.recv(128).decode('utf-8')
 
 
@@ -237,7 +249,7 @@ def send_delete_message(client_socket, identifier, base_path, file_path, is_dire
     is_directory = is_directory.to_bytes(1, 'little')
 
     packet = is_identifier + identifier + delete + is_directory + path_size + sent_file_path.encode('utf-8')
-    client_socket.send(packet)
+    client_socket.sendall(packet)
 
 
 def send_modify_message(client_socket, identifier, base_path, file_path, is_directory):
@@ -252,14 +264,18 @@ def send_modify_message(client_socket, identifier, base_path, file_path, is_dire
     # If file doesn't exists, return
     if not os.path.isfile(file_path):
         return
-    with open(file_path, 'rb') as f:
-        data = f.read()
+
+    try:
+        with open(file_path, 'rb') as f:
+            data = f.read()
+    except PermissionError:
+        return
 
     data_size = len(data).to_bytes(4, 'little')
     packet = is_identifier + identifier + modify + is_directory + path_size + sent_file_path.encode('utf-8') \
              + data_size + data
 
-    client_socket.send(packet)
+    client_socket.sendall(packet)
 
 
 def send_move_message(client_socket, identifier, base_path, src_path, dest_path, is_directory):
@@ -276,7 +292,7 @@ def send_move_message(client_socket, identifier, base_path, src_path, dest_path,
     packet = is_identifier + identifier + move + is_directory + src_path_size + sent_src_file_path.encode('utf-8') \
              + dest_path_size + sent_dest_file_path.encode('utf-8')
 
-    client_socket.send(packet)
+    client_socket.sendall(packet)
 
 
 class Handler(PatternMatchingEventHandler):
@@ -301,6 +317,7 @@ class Handler(PatternMatchingEventHandler):
         # If we got modified event on directory we ignore (Windows OS)
         if os.path.isdir(event.src_path):
             return
+
         send_modify_message(self.client_socket, self.identifier, self.base_path, event.src_path,
                             os.path.isdir(event.src_path))
 

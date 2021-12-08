@@ -34,6 +34,14 @@ def add_packet_to_update_dict(packet, identifier, client_address):
         identifier_dict[address].append(packet)
 
 
+def recv(client_socket, recv_size):
+    recv_data = b''
+    while len(recv_data) < recv_size:
+        recv_data += client_socket.recv(recv_size - len(recv_data))
+
+    return recv_data
+
+
 def send_file_to_client(identifier, path, client_socket):
     send_path = os.path.relpath(path, identifier)
     packet = CREATE_COMMAND.to_bytes(1, 'little')
@@ -42,7 +50,7 @@ def send_file_to_client(identifier, path, client_socket):
     packet += len(send_path).to_bytes(4, 'little')
     packet += send_path.encode('utf-8')
     if os.path.isdir(path):
-        client_socket.send(packet)
+        client_socket.sendall(packet)
         return
 
     with open(path, 'rb') as f:
@@ -51,13 +59,13 @@ def send_file_to_client(identifier, path, client_socket):
     packet += len(file_data).to_bytes(4, 'little')
     packet += file_data
 
-    client_socket.send(packet)
+    client_socket.sendall(packet)
 
 
 # Indicates that we reach all of files
 def send_empty_file_to_client(client_socket):
     packet = int(0).to_bytes(1, 'little')
-    client_socket.send(packet)
+    client_socket.sendall(packet)
 
 
 def send_all_directory_to_client(path, identifier, client_socket):
@@ -92,7 +100,7 @@ def create_command(client_socket, identifier):
         return packet
 
     file_size = int.from_bytes(client_socket.recv(4), 'little')
-    file_data = client_socket.recv(file_size)
+    file_data = recv(client_socket, file_size)
 
     # If already exists the same file we return with empty update packet
     if os.path.isfile(path):
@@ -149,7 +157,7 @@ def modify_command(client_socket, identifier):
     path = path.replace("/", os.sep)
     path = path.replace('\\', os.sep)
     file_size = int.from_bytes(client_socket.recv(4), 'little')
-    file_data = client_socket.recv(file_size)
+    file_data = recv(client_socket, file_size)
 
     os.makedirs(os.path.dirname(path), exist_ok=True)
 
@@ -232,10 +240,10 @@ def add_client_to_file_dict(identifier, client_address):
 # Send all update packets to client
 def update_client(client_socket, identifier, client_address):
     packets_to_send = file_changes_dict[identifier][client_address]
-    client_socket.send(len(packets_to_send).to_bytes(4, 'little'))
+    client_socket.sendall(len(packets_to_send).to_bytes(4, 'little'))
 
     for packet_to_send in packets_to_send:
-        client_socket.send(packet_to_send)
+        client_socket.sendall(packet_to_send)
 
     packets_to_send.clear()
 
@@ -250,14 +258,15 @@ def handle_client(client_socket, client_address):
     # If not received identifier we generate one and send it to client, otherwise handle client command
     if is_identifier == 0:
         identifier = generate_identifier()
+        print(identifier)
         os.makedirs(identifier, exist_ok=True)
-        client_socket.send(identifier.encode('utf-8'))
+        client_socket.sendall(identifier.encode('utf-8'))
     else:
         identifier = client_socket.recv(128).decode('utf-8')
         command = int.from_bytes(client_socket.recv(1), 'little')
         # If client identify with invalid identifier we send him error code (-1)
         if not os.path.isdir(identifier):
-            client_socket.send(int(-1).to_bytes(1, 'little', signed=True))
+            client_socket.sendall(int(-1).to_bytes(1, 'little', signed=True))
             client_socket.close()
             raise ClientDisconnectedException()
         handle_command(identifier, command, client_socket, client_address)
